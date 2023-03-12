@@ -1,4 +1,4 @@
-import {Relay, relayInit} from './relay'
+import {Relay, RelayEvent, relayInit} from './relay'
 import {normalizeURL} from './utils'
 import {Filter} from './filter'
 import {Event} from './event'
@@ -7,14 +7,46 @@ import {SubscriptionOptions, Sub, Pub} from './relay'
 export class SimplePool {
   private _conn: {[url: string]: Relay}
   private _seenOn: {[id: string]: Set<string>} = {} // a map of all events we've seen in each relay
+  private _connectListeners: Set<(relay: Relay) => void> = new Set()
+  private _disconnectListeners: Set<(relay: Relay) => void> = new Set()
 
   private eoseSubTimeout: number
   private getTimeout: number
 
-  constructor(options: {eoseSubTimeout?: number; getTimeout?: number} = {}) {
+  constructor(
+    options: {
+      eoseSubTimeout?: number
+      getTimeout?: number
+    } = {}
+  ) {
     this._conn = {}
     this.eoseSubTimeout = options.eoseSubTimeout || 3400
     this.getTimeout = options.getTimeout || 3400
+  }
+
+  on<T extends keyof RelayEvent, U extends RelayEvent[T]>(type: T, cb: U) {
+    switch (type) {
+      case 'connect':
+        this._connectListeners.add(cb as (relay: Relay) => void | Promise<void>)
+        break
+      case 'disconnect':
+        this._disconnectListeners.add(
+          cb as (relay: Relay) => void | Promise<void>
+        )
+        break
+    }
+  }
+
+  off<T extends keyof RelayEvent, U extends RelayEvent[T]>(type: T, cb: U) {
+    if (type === 'connect') {
+      this._connectListeners.delete(
+        cb as (relay: Relay) => void | Promise<void>
+      )
+    } else if (type === 'disconnect') {
+      this._disconnectListeners.delete(
+        cb as (relay: Relay) => void | Promise<void>
+      )
+    }
   }
 
   close(relays: string[]): void {
@@ -39,6 +71,19 @@ export class SimplePool {
       listTimeout: this.getTimeout * 0.9
     })
     this._conn[nm] = relay
+
+    console.log('ensureRelay')
+    console.log(this._connectListeners)
+
+    relay.on('connect', () => {
+      for (let cb of this._connectListeners.values()) {
+        console.log(cb)
+        cb(relay)
+      }
+    })
+    relay.on('disconnect', () => {
+      for (let cb of this._disconnectListeners.values()) cb(relay)
+    })
 
     await relay.connect()
 
