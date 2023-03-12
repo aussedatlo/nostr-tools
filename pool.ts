@@ -4,17 +4,30 @@ import {Filter} from './filter'
 import {Event} from './event'
 import {SubscriptionOptions, Sub, Pub} from './relay'
 
+export type RelayCallback = (relay: Relay) => void
+
 export class SimplePool {
   private _conn: {[url: string]: Relay}
   private _seenOn: {[id: string]: Set<string>} = {} // a map of all events we've seen in each relay
 
   private eoseSubTimeout: number
   private getTimeout: number
+  private onConnect: null | RelayCallback
+  private onDisconnect: null | RelayCallback
 
-  constructor(options: {eoseSubTimeout?: number; getTimeout?: number} = {}) {
+  constructor(
+    options: {
+      eoseSubTimeout?: number
+      getTimeout?: number
+      onConnect?: RelayCallback
+      onDisconnect?: RelayCallback
+    } = {}
+  ) {
     this._conn = {}
     this.eoseSubTimeout = options.eoseSubTimeout || 3400
     this.getTimeout = options.getTimeout || 3400
+    this.onConnect = options.onConnect || null
+    this.onDisconnect = options.onDisconnect || null
   }
 
   close(relays: string[]): void {
@@ -39,6 +52,9 @@ export class SimplePool {
       listTimeout: this.getTimeout * 0.9
     })
     this._conn[nm] = relay
+
+    relay.on('connect', () => this.onConnect?.(relay))
+    relay.on('disconnect', () => this.onDisconnect?.(relay))
 
     await relay.connect()
 
