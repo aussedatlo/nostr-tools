@@ -4,7 +4,7 @@ import {Event, verifySignature, validateEvent} from './event'
 import {Filter, matchFilters} from './filter'
 import {getHex64, getSubscriptionId} from './fakejson'
 
-type RelayEvent = {
+export type RelayEvent = {
 	connect: () => void
 	disconnect: () => void
 	error: () => void

@@ -1,32 +1,45 @@
-import {Relay, relayInit} from './relay'
-import {normalizeURL} from './utils'
-import {Filter} from './filter'
-import {Event} from './event'
-import {SubscriptionOptions, Sub, Pub} from './relay'
+import { Relay, RelayEvent, relayInit } from './relay'
+import { normalizeURL } from './utils'
+import { Filter } from './filter'
+import { Event } from './event'
+import { SubscriptionOptions, Sub, Pub } from './relay'
 
-export class SimplePool {
-  private _conn: {[url: string]: Relay}
-  private _seenOn: {[id: string]: Set<string>} = {} // a map of all events we've seen in each relay
+export type SimplePool = {
+  eoseSubTimeout: number
+  getTimeout: number
+  close(relays: string[]): void
+  sub(relays: string[], filters: Filter[], opts?: SubscriptionOptions): Sub
+  get(
+    relays: string[],
+    filter: Filter,
+    opts?: SubscriptionOptions
+  ): Promise<Event | null>
+  list(
+    relays: string[],
+    filters: Filter[],
+    opts?: SubscriptionOptions
+  ): Promise<Event[]>
+  seenOn(id: string): string[]
+  publish(relays: string[], event: Event): Pub
+}
 
-  private eoseSubTimeout: number
-  private getTimeout: number
+export function simplePoolInit(options: { eoseSubTimeout?: number; getTimeout?: number } = {}): SimplePool {
+  const _conn: { [url: string]: Relay } = {}
+  const _seenOn: { [id: string]: Set<string> } = {} // a map of all events we've seen in each relay
 
-  constructor(options: {eoseSubTimeout?: number; getTimeout?: number} = {}) {
-    this._conn = {}
-    this.eoseSubTimeout = options.eoseSubTimeout || 3400
-    this.getTimeout = options.getTimeout || 3400
-  }
+  const eoseSubTimeout: number = options.eoseSubTimeout || 3400
+  const getTimeout: number = options.getTimeout || 3400
 
-  close(relays: string[]): void {
+  function close(relays: string[]): void {
     relays.forEach(url => {
-      let relay = this._conn[normalizeURL(url)]
+      let relay = _conn[normalizeURL(url)]
       if (relay) relay.close()
     })
   }
 
-  async ensureRelay(url: string): Promise<Relay> {
+  async function ensureRelay(url: string): Promise<Relay> {
     const nm = normalizeURL(url)
-    const existing = this._conn[nm]
+    const existing = _conn[nm]
     if (existing && existing.status === 1) return existing
 
     if (existing) {
@@ -35,26 +48,26 @@ export class SimplePool {
     }
 
     const relay = relayInit(nm, {
-      getTimeout: this.getTimeout * 0.9,
-      listTimeout: this.getTimeout * 0.9
+      getTimeout: getTimeout * 0.9,
+      listTimeout: getTimeout * 0.9
     })
-    this._conn[nm] = relay
+    _conn[nm] = relay
 
     await relay.connect()
 
     return relay
   }
 
-  sub(relays: string[], filters: Filter[], opts?: SubscriptionOptions): Sub {
+  function sub(relays: string[], filters: Filter[], opts?: SubscriptionOptions): Sub {
     let _knownIds: Set<string> = new Set()
-    let modifiedOpts = {...(opts || {})}
+    let modifiedOpts = { ...(opts || {}) }
     modifiedOpts.alreadyHaveEvent = (id, url) => {
       if (opts?.alreadyHaveEvent?.(id, url)) {
         return true
       }
-      let set = this._seenOn[id] || new Set()
+      let set = _seenOn[id] || new Set()
       set.add(url)
-      this._seenOn[id] = set
+      _seenOn[id] = set
       return _knownIds.has(id)
     }
 
@@ -67,12 +80,12 @@ export class SimplePool {
     let eoseTimeout = setTimeout(() => {
       eoseSent = true
       for (let cb of eoseListeners.values()) cb()
-    }, this.eoseSubTimeout)
+    }, eoseSubTimeout)
 
     relays.forEach(async relay => {
       let r
       try {
-        r = await this.ensureRelay(relay)
+        r = await ensureRelay(relay)
       } catch (err) {
         handleEose()
         return
@@ -126,54 +139,54 @@ export class SimplePool {
     return greaterSub
   }
 
-  get(
+  function get(
     relays: string[],
     filter: Filter,
     opts?: SubscriptionOptions
   ): Promise<Event | null> {
     return new Promise(resolve => {
-      let sub = this.sub(relays, [filter], opts)
+      let s = sub(relays, [filter], opts)
       let timeout = setTimeout(() => {
-        sub.unsub()
+        s.unsub()
         resolve(null)
-      }, this.getTimeout)
-      sub.on('event', (event: Event) => {
+      }, getTimeout)
+      s.on('event', (event: Event) => {
         resolve(event)
         clearTimeout(timeout)
-        sub.unsub()
+        s.unsub()
       })
     })
   }
 
-  list(
+  function list(
     relays: string[],
     filters: Filter[],
     opts?: SubscriptionOptions
   ): Promise<Event[]> {
     return new Promise(resolve => {
       let events: Event[] = []
-      let sub = this.sub(relays, filters, opts)
+      let s = sub(relays, filters, opts)
 
-      sub.on('event', (event: Event) => {
+      s.on('event', (event: Event) => {
         events.push(event)
       })
 
       // we can rely on an eose being emitted here because pool.sub() will fake one
-      sub.on('eose', () => {
-        sub.unsub()
+      s.on('eose', () => {
+        s.unsub()
         resolve(events)
       })
     })
   }
 
-  publish(relays: string[], event: Event): Pub {
+  function publish(relays: string[], event: Event): Pub {
     const pubs: Pub[] = []
     relays.forEach(async relay => {
       let r
       try {
-        r = await this.ensureRelay(relay)
+        r = await ensureRelay(relay)
         pubs.push(r.publish(event))
-      } catch (_) {}
+      } catch (_) { }
     })
     return {
       on(type, cb) {
@@ -187,7 +200,9 @@ export class SimplePool {
     }
   }
 
-  seenOn(id: string): string[] {
-    return Array.from(this._seenOn[id]?.values?.() || [])
+  function seenOn(id: string): string[] {
+    return Array.from(_seenOn[id]?.values?.() || [])
   }
+
+  return { eoseSubTimeout, getTimeout, close, sub, get, list, publish, seenOn }
 }
