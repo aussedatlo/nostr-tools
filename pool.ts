@@ -7,6 +7,8 @@ import {SubscriptionOptions, Sub, Pub} from './relay'
 export class SimplePool {
   private _conn: {[url: string]: Relay}
   private _seenOn: {[id: string]: Set<string>} = {} // a map of all events we've seen in each relay
+  private _connectListeners: Set<(relay: Relay) => void> = new Set()
+  private _disconnectListeners: Set<(relay: Relay) => void> = new Set()
 
   private eoseSubTimeout: number
   private getTimeout: number
@@ -15,6 +17,28 @@ export class SimplePool {
     this._conn = {}
     this.eoseSubTimeout = options.eoseSubTimeout || 3400
     this.getTimeout = options.getTimeout || 3400
+  }
+
+  on(event: 'connect' | 'disconnect', listener: (relay: Relay) => void): void {
+    switch (event) {
+      case 'connect':
+        this._connectListeners.add(listener)
+        break
+      case 'disconnect':
+        this._disconnectListeners.add(listener)
+        break
+    }
+  }
+
+  off(event: 'connect' | 'disconnect', listener: () => Relay): void {
+    switch (event) {
+      case 'connect':
+        this._connectListeners.delete(listener)
+        break
+      case 'disconnect':
+        this._disconnectListeners.delete(listener)
+        break
+    }
   }
 
   close(relays: string[]): void {
@@ -39,6 +63,13 @@ export class SimplePool {
       listTimeout: this.getTimeout * 0.9
     })
     this._conn[nm] = relay
+
+    relay.on('connect', () => {
+      for (let cb of this._connectListeners.values()) cb(relay)
+    })
+    relay.on('disconnect', () => {
+      for (let cb of this._disconnectListeners.values()) cb(relay)
+    })
 
     await relay.connect()
 
