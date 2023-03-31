@@ -249,14 +249,14 @@ export function relayInit(
           event: [],
           eose: []
         }
-        subListeners[subid][type].push(cb)
+        subListeners[subid][type].push(cb as () => void)
       },
       off: <T extends keyof SubEvent, U extends SubEvent[T]>(
         type: T,
         cb: U
       ): void => {
         let listeners = subListeners[subid]
-        let idx = listeners[type].indexOf(cb)
+        let idx = listeners[type].indexOf(cb as () => void)
         if (idx >= 0) listeners[type].splice(idx, 1)
       }
     }
@@ -269,7 +269,7 @@ export function relayInit(
       type: T,
       cb: U
     ): void => {
-      listeners[type].push(cb)
+      listeners[type].push(cb as () => void)
       if (type === 'connect' && ws?.readyState === 1) {
         // i would love to know why we need this
         ;(cb as () => void)()
@@ -279,7 +279,7 @@ export function relayInit(
       type: T,
       cb: U
     ): void => {
-      let index = listeners[type].indexOf(cb)
+      let index = listeners[type].indexOf(cb as () => void)
       if (index !== -1) listeners[type].splice(index, 1)
     },
     list: (filters: Filter[], opts?: SubscriptionOptions): Promise<Event[]> =>
